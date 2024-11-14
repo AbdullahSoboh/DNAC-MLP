@@ -1,3 +1,7 @@
+import streamlit as st
+from dotenv import load_dotenv
+import os
+import shelve
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import json
@@ -125,23 +129,23 @@ def find_relevant_api(query, api_endpoints, api_embeddings, model, top_k=5):
 # Display matched APIs in a readable format with numbering
 def display_matched_apis(matched_apis):
     for idx, api in enumerate(matched_apis, start=1):
-        print(f"{idx}.")
-        print(f"Path: {api['path']}")
-        print(f"Method: {api['method']}")
-        print(f"Operation ID: {api['operation_id']}")
-        print(f"Summary: {api['summary']}")
-        print(f"Description: {api['description']}")
-        print(f"Tags: {', '.join(api['tags'])}\n")
-        print("---")
+        st.chat_message(f"{idx}.")
+        st.chat_message(f"Path: {api['path']}")
+        st.chat_message(f"Method: {api['method']}")
+        st.chat_message(f"Operation ID: {api['operation_id']}")
+        st.chat_message(f"Summary: {api['summary']}")
+        st.chat_message(f"Description: {api['description']}")
+        st.chat_message(f"Tags: {', '.join(api['tags'])}\n")
+        st.chat_message("---")
 
 def display_stored_ids():
-    print("\nStored Device IDs:")
+    st.chat_message("\nStored Device IDs:")
     for idx, dev_id in enumerate(stored_data['device_ids'], start=1):
-        print(f"{idx}. {dev_id}")
-    print("Stored Site IDs:")
+        st.chat_message(f"{idx}. {dev_id}")
+    st.chat_message("Stored Site IDs:")
     for idx, site_id in enumerate(stored_data['site_ids'], start=1):
-        print(f"{idx}. {site_id}")
-    print()
+        st.chat_message(f"{idx}. {site_id}")
+    st.chat_message()
 
 def get_value_from_selection(selection, stored_list, placeholder):
     if selection.isdigit():
@@ -149,14 +153,14 @@ def get_value_from_selection(selection, stored_list, placeholder):
         if 1 <= selection <= len(stored_list):
             return stored_list[selection - 1]
         else:
-            print("Invalid selection.")
-            return input(f"Please enter value for '{placeholder}': ").strip()
+            st.chat_message("Invalid selection.")
+            return st.chat_input(f"Please enter value for '{placeholder}': ")
     else:
         return selection  # User entered a custom ID
 
 # Execute the API call and display results
 def execute_api(api, rest_client):
-    print(f"Executing API: {api['operation_id']}")
+    st.chat_message(f"Executing API: {api['operation_id']}")
     try:
         # Check for placeholders in the path
         path = api['path']
@@ -165,10 +169,12 @@ def execute_api(api, rest_client):
             for placeholder in placeholders:
                 placeholder_lower = placeholder.lower()
                 # Ask user if they want to see stored IDs
-                show_ids_decision = input(f"Do you want to see stored IDs for '{placeholder}'? (yes/no): ").strip().lower()
+                show_ids_decision = st.chat_input(f"Do you want to see stored IDs for '{placeholder}'? (yes/no): ")
+                #show_ids_decision=show_ids_decision.strip().lower()
                 if show_ids_decision == 'yes':
                     display_stored_ids()
-                value = input(f"Please enter value for '{placeholder}': ").strip()
+                value = st.chat_input(f"Please enter value for '{placeholder}': ")
+                #value=value.strip()
                 # Replace the placeholder with the value in the path
                 path = path.replace(f'{{{placeholder}}}', value)
 
@@ -177,47 +183,52 @@ def execute_api(api, rest_client):
         elif api['method'].lower() == 'post':
             # For POST requests, you might need to supply payload data
             payload = {}
-            need_payload = input("This API requires a payload. Would you like to provide it? (yes/no): ").strip().lower()
+            need_payload = st.chat_input("This API requires a payload. Would you like to provide it? (yes/no): ")
+            #need_payload=need_payload.strip().lower()
             if need_payload == 'yes':
                 # Prompt user for payload details
-                print("Enter payload data as key-value pairs. Type 'done' when finished.")
+                st.chat_message("Enter payload data as key-value pairs. Type 'done' when finished.")
                 while True:
-                    key = input("Enter payload field name (or 'done' to finish): ").strip()
+                    key = st.chat_input("Enter payload field name (or 'done' to finish): ")
+                    #key=key.strip()
                     if key.lower() == 'done':
                         break
                     if key.lower() == 'show ids':
                         display_stored_ids()
                         continue
-                    value = input(f"Enter value for '{key}': ").strip()
+                    value = st.chat_input(f"Enter value for '{key}': ")
+                    #value=value.strip()
                     if value.lower() == 'show ids':
                         display_stored_ids()
-                        value = input(f"Enter value for '{key}': ").strip()
+                        value = st.chat_input(f"Enter value for '{key}': ")
+                        #value=value.strip()
                     payload[key] = value
             else:
-                print("Using empty payload.")
+                st.chat_message("Using empty payload.")
             response = rest_client.post_api(path, payload)
         else:
-            print(f"HTTP method {api['method']} not supported for execution.")
+            st.chat_message(f"HTTP method {api['method']} not supported for execution.")
             return
 
         # Pretty print the response
-        print("\nAPI Response:")
-        print(json.dumps(response, indent=4))
+        st.chat_message("\nAPI Response:")
+        st.chat_message(json.dumps(response, indent=4))
 
         # Extract and store IDs
         extract_and_store_ids(response)
 
         # Ask if the user wants a summary
-        summarize_decision = input("Would you like GPT-4 to summarize the API response? (yes/no): ").strip().lower()
+        summarize_decision = st.chat_input("Would you like GPT-4 to summarize the API response? (yes/no): ")
+        #summarize_decision=summarize_decision.strip().lower()
         if summarize_decision == 'yes':
             summary = summarize_response(response)
-            print("\nGPT-4 Summary of the API Response:")
-            print(summary)
+            st.chat_message("\nGPT-4 Summary of the API Response:")
+            st.chat_message(summary)
     except requests.exceptions.HTTPError as err:
-        print(f"HTTP error occurred: {err}")
-        print(f"Response content: {err.response.text}")
+        st.chat_message(f"HTTP error occurred: {err}")
+        st.chat_message(f"Response content: {err.response.text}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        st.chat_message(f"An error occurred: {e}")
 
 def extract_and_store_ids(response):
     if isinstance(response, dict) and 'response' in response:
@@ -233,12 +244,12 @@ def store_ids_from_item(item):
     device_id = item.get('id')
     if device_id and device_id not in stored_data['device_ids']:
         stored_data['device_ids'].append(device_id)
-        print(f"Stored device ID: {device_id}")
+        st.chat_message(f"Stored device ID: {device_id}")
     # Extract site ID
     site_id = item.get('siteId')
     if site_id and site_id not in stored_data['site_ids']:
         stored_data['site_ids'].append(site_id)
-        print(f"Stored site ID: {site_id}")
+        st.chat_message(f"Stored site ID: {site_id}")
 
 # Summarize the API response using Azure OpenAI
 def summarize_response(response):
@@ -335,93 +346,103 @@ def hybrid_search(
     question_similarity_scores = util.cos_sim(query_embedding, question_embeddings)[0]
     best_match_idx = torch.argmax(question_similarity_scores)
     best_score = question_similarity_scores[best_match_idx].item()
-    print(f"Best similarity score with expected questions: {best_score}")
+    st.chat_message(f"Best similarity score with expected questions: {best_score}")
 
     # Check if similarity is above the threshold
     if best_score > similarity_threshold:
         best_question = list(expected_questions.keys())[best_match_idx]
         matched_api = expected_questions[best_question]
-        print(f"\nMatched API directly from expected question: '{best_question}'")
-        print(f"Path: {matched_api['path']}")
-        print(f"Method: {matched_api['method']}")
-        print(f"Operation ID: {matched_api['operation_id']}")
-        print(f"Summary: {matched_api['summary']}")
-        print(f"Description: {matched_api['description']}")
-        print(f"Tags: {', '.join(matched_api['tags'])}\n")
-        print("---")
+        st.chat_message(f"\nMatched API directly from expected question: '{best_question}'")
+        st.chat_message(f"Path: {matched_api['path']}")
+        st.chat_message(f"Method: {matched_api['method']}")
+        st.chat_message(f"Operation ID: {matched_api['operation_id']}")
+        st.chat_message(f"Summary: {matched_api['summary']}")
+        st.chat_message(f"Description: {matched_api['description']}")
+        st.chat_message(f"Tags: {', '.join(matched_api['tags'])}\n")
+        st.chat_message("---")
         # Ask the user if they want to execute the matched API
-        execute_decision = input("Would you like to execute this API? (yes/no): ").strip().lower()
+        execute_decision = st.chat_input("Would you like to execute this API? (yes/no): ")
+        #execute_decision=execute_decision.strip().lower()
         if execute_decision == 'yes':
             execute_api(matched_api, rest_client)
         else:
             # Ask if the user wants to perform a wider search
-            search_decision = input("Would you like to perform a wider search across all APIs? (yes/no): ").strip().lower()
+            search_decision = st.chat_input("Would you like to perform a wider search across all APIs? (yes/no): ")
+            #search_decision=search_decision.strip().lower()
             if search_decision == 'yes':
                 # Perform a full API search
                 matched_apis = find_relevant_api(query, api_endpoints, api_embeddings, model, top_k=top_k)
                 display_matched_apis(matched_apis)
                 # Prompt the user to select an API to execute
                 if matched_apis:
-                    print(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
+                    st.chat_message(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
                     while True:
-                        selection = input("Your choice: ").strip()
+                        selection = st.chat_input("Your choice: ")
+                        #selection=selection.strip()
                         if selection.isdigit():
                             selection = int(selection)
                             if 0 <= selection <= len(matched_apis):
                                 break
-                        print(f"Please enter a number between 0 and {len(matched_apis)}.")
+                        st.chat_message(f"Please enter a number between 0 and {len(matched_apis)}.")
                     if selection == 0:
-                        print("Skipping API execution.")
+                        st.chat_message("Skipping API execution.")
                     else:
                         selected_api = matched_apis[selection - 1]
                         execute_api(selected_api, rest_client)
                 else:
-                    print("No APIs found to execute.")
+                    st.chat_message("No APIs found to execute.")
             else:
-                print("Okay, no action will be taken.")
+                st.chat_message("Okay, no action will be taken.")
     else:
         # If no close match, fallback to full API search
-        print("\nNo close match found in expected questions. Performing full API search...")
+        st.chat_message("\nNo close match found in expected questions. Performing full API search...")
         matched_apis = find_relevant_api(query, api_endpoints, api_embeddings, model, top_k=top_k)
         display_matched_apis(matched_apis)
         # Prompt the user to select an API to execute
         if matched_apis:
-            print(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
+            st.chat_message(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
             while True:
-                selection = input("Your choice: ").strip()
+                selection = st.chat_input("Your choice: ")
+                #selection=selection.strip()
                 if selection.isdigit():
                     selection = int(selection)
                     if 0 <= selection <= len(matched_apis):
                         break
-                print(f"Please enter a number between 0 and {len(matched_apis)}.")
+                st.chat_message(f"Please enter a number between 0 and {len(matched_apis)}.")
             if selection == 0:
-                print("Skipping API execution.")
+                st.chat_message("Skipping API execution.")
             else:
                 selected_api = matched_apis[selection - 1]
                 execute_api(selected_api, rest_client)
         else:
-            print("No APIs found to execute.")
+            st.chat_message("No APIs found to execute.")
 
 # Main function to set up and continuously search APIs
 def main():
     # Server credentials (used for authentication and API calls)
-    server = input("Enter the server address (e.g., 10.85.116.58): ").strip()
+    #server = st.chat_input("Enter the server address (e.g., 10.85.116.58): ")
+    #server=server.strip()
+    server="172.28.50.113"
     authenticated = False
     while not authenticated:
-        username = input("Enter your username: ").strip()
-        password = getpass.getpass("Enter your password: ")
+        # username = st.chat_input("Enter your username: ")
+        # #username=username.strip()
+        # password = st.chat_input("Enter your password: ")
+        username="admin"
+        password="maglev1@3"
         try:
             # Initialize RestClientManager
             rest_client = RestClientManager(server, username, password)
             authenticated = True  # Set flag to True if authentication succeeds
         except requests.exceptions.HTTPError as err:
-            print(f"Authentication failed: {err}")
-            retry = input("Would you like to try again? (yes/no): ").strip().lower()
+            st.chat_message(f"Authentication failed: {err}")
+            retry = st.chat_input("Would you like to try again? (yes/no): ")
+            #retry=retry.strip().lower()
             if retry != 'yes':
-                print("Exiting...")
+                st.chat_message("Exiting...")
                 return  # Exit the program
         except Exception as e:
-            print(f"An error occurred: {e}")
+            st.chat_message(f"An error occurred: {e}")
             return  # Exit the program
 
     # Load Swagger JSON from a local file
@@ -459,6 +480,14 @@ def main():
             "description": "Returns the list of provisioned devices based on query parameters.",
             "tags": ["SDA"]
         },
+        "Build a site network from json": {
+            "path": "/dna/intent/api/v1/sda/provisionDevices",
+            "method": "get",
+            "operation_id": "getProvisionedDevices",
+            "summary": "Get provisioned devices",
+            "description": "Returns the list of provisioned devices based on query parameters.",
+            "tags": ["SDA"]
+        },
         # Add more expected question-to-API mappings as needed
     }
 
@@ -467,26 +496,87 @@ def main():
     question_embeddings = model.encode(question_texts, convert_to_tensor=True)
 
     # Continuous query loop
-    print("\nWelcome to the Cisco DNAC API Chatbot! Type 'exit' to quit.\n")
+    st.chat_message("\nWelcome to the Cisco DNAC API Chatbot! Type 'exit' to quit.\n")
     while True:
-        user_query = input("Enter your question about Cisco DNAC APIs (or type 'list ids' to view stored IDs): ")
+        if user_query := st.chat_input("Enter your question about Cisco DNAC APIs (or type 'list ids' to view stored IDs): "):
 
         # Check if the user wants to exit or list IDs
-        if user_query.lower() in ['exit', 'quit']:
-            print("Goodbye!")
-            break
-        elif user_query.lower() == 'list ids':
-            display_stored_ids()
-            continue
+        # if user_query.lower() in ['exit', 'quit']:
+        #     st.chat_message("Goodbye!")
+        #     break
+        # elif user_query.lower() == 'list ids':
+        #     display_stored_ids()
+        #     continue
 
         # Run hybrid search
-        hybrid_search(
-            user_query, expected_questions, question_embeddings,
-            api_endpoints, api_embeddings, model, rest_client,
-            similarity_threshold=0.7
-        )
+            hybrid_search(
+                user_query, expected_questions, question_embeddings,
+                api_endpoints, api_embeddings, model, rest_client,
+                similarity_threshold=0.7
+            )
 
-        print("\n---\n")
+            st.chat_message("\n---\n")
 
 if __name__ == "__main__":
     main()
+
+st.title("DNAC Chatbot Interface")
+
+USER_AVATAR = "👤"
+BOT_AVATAR = "🤖"
+#client = main()
+
+# Ensure openai_model is initialized in session state
+if "openai_model" not in st.session_state:
+    st.session_state["openai_model"] = "gpt-3.5-turbo"
+
+
+# Load chat history from shelve file
+def load_chat_history():
+    with shelve.open("chat_history") as db:
+        return db.get("messages", [])
+
+
+# Save chat history to shelve file
+def save_chat_history(messages):
+    with shelve.open("chat_history") as db:
+        db["messages"] = messages
+
+
+# Initialize or load chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = load_chat_history()
+
+# Sidebar with a button to delete chat history
+with st.sidebar:
+    if st.button("Delete Chat History"):
+        st.session_state.messages = []
+        save_chat_history([])
+
+# Display chat messages
+for message in st.session_state.messages:
+    avatar = USER_AVATAR if message["role"] == "user" else BOT_AVATAR
+    with st.chat_message(message["role"], avatar=avatar):
+        st.markdown(message["content"])
+
+# Main chat interface
+if prompt := st.chat_input("How can I help?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user", avatar=USER_AVATAR):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant", avatar=BOT_AVATAR):
+        message_placeholder = st.empty()
+        full_response = ""
+        for response in main()(
+            model=st.session_state["openai_model"],
+            messages=st.session_state["messages"],
+            stream=True,
+        ):
+            full_response += response.choices[0].delta.content or ""
+            message_placeholder.markdown(full_response + "|")
+        message_placeholder.markdown(full_response)
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+# Save chat history after each interaction
+save_chat_history(st.session_state.messages)
