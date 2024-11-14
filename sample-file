@@ -1,0 +1,11 @@
+for create site
+
+{
+    "type": "string",
+    "site": {
+        "area": {
+            "name": "Ottawa",
+            "parentName": "string"
+        },
+    }
+}

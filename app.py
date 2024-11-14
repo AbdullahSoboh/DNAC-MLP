@@ -51,12 +51,6 @@ required_env_vars = {
     "CISCO_USER_ID": CISCO_USER_ID,
 }
 
-missing_env_vars = [var for var, value in required_env_vars.items() if not value]
-if missing_env_vars:
-    log.error(f"Missing required environment variables: {', '.join(missing_env_vars)}")
-    # Optionally, you can exit the script if critical variables are missing
-    # exit(1)
-
 # Global storage for IDs
 stored_data = {
     'device_ids': [],
@@ -154,7 +148,7 @@ def get_value_from_selection(selection, stored_list, placeholder):
             return stored_list[selection - 1]
         else:
             st.chat_message("Invalid selection.")
-            return st.chat_input(f"Please enter value for '{placeholder}': ")
+            return st.chat_input(f"Please enter value for '{placeholder}': ",key="input")
     else:
         return selection  # User entered a custom ID
 
@@ -169,11 +163,11 @@ def execute_api(api, rest_client):
             for placeholder in placeholders:
                 placeholder_lower = placeholder.lower()
                 # Ask user if they want to see stored IDs
-                show_ids_decision = st.chat_input(f"Do you want to see stored IDs for '{placeholder}'? (yes/no): ")
+                show_ids_decision = st.chat_input(f"Do you want to see stored IDs for '{placeholder}'? (yes/no): ",key="input")
                 #show_ids_decision=show_ids_decision.strip().lower()
                 if show_ids_decision == 'yes':
                     display_stored_ids()
-                value = st.chat_input(f"Please enter value for '{placeholder}': ")
+                value = st.chat_input(f"Please enter value for '{placeholder}': ",key="input")
                 #value=value.strip()
                 # Replace the placeholder with the value in the path
                 path = path.replace(f'{{{placeholder}}}', value)
@@ -183,13 +177,13 @@ def execute_api(api, rest_client):
         elif api['method'].lower() == 'post':
             # For POST requests, you might need to supply payload data
             payload = {}
-            need_payload = st.chat_input("This API requires a payload. Would you like to provide it? (yes/no): ")
+            need_payload = st.chat_input("This API requires a payload. Would you like to provide it? (yes/no): ",key="input")
             #need_payload=need_payload.strip().lower()
             if need_payload == 'yes':
                 # Prompt user for payload details
                 st.chat_message("Enter payload data as key-value pairs. Type 'done' when finished.")
                 while True:
-                    key = st.chat_input("Enter payload field name (or 'done' to finish): ")
+                    key = st.chat_input("Enter payload field name (or 'done' to finish): ",key="input")
                     #key=key.strip()
                     if key.lower() == 'done':
                         break
@@ -361,13 +355,13 @@ def hybrid_search(
         st.chat_message(f"Tags: {', '.join(matched_api['tags'])}\n")
         st.chat_message("---")
         # Ask the user if they want to execute the matched API
-        execute_decision = st.chat_input("Would you like to execute this API? (yes/no): ")
+        execute_decision = st.chat_input("Would you like to execute this API? (yes/no): ",key="input")
         #execute_decision=execute_decision.strip().lower()
         if execute_decision == 'yes':
             execute_api(matched_api, rest_client)
         else:
             # Ask if the user wants to perform a wider search
-            search_decision = st.chat_input("Would you like to perform a wider search across all APIs? (yes/no): ")
+            search_decision = st.chat_input("Would you like to perform a wider search across all APIs? (yes/no): ",key="input")
             #search_decision=search_decision.strip().lower()
             if search_decision == 'yes':
                 # Perform a full API search
@@ -377,7 +371,7 @@ def hybrid_search(
                 if matched_apis:
                     st.chat_message(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
                     while True:
-                        selection = st.chat_input("Your choice: ")
+                        selection = st.chat_input("Your choice: ",key="input")
                         #selection=selection.strip()
                         if selection.isdigit():
                             selection = int(selection)
@@ -402,7 +396,7 @@ def hybrid_search(
         if matched_apis:
             st.chat_message(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
             while True:
-                selection = st.chat_input("Your choice: ")
+                selection = st.chat_input("Your choice: ",key="input")
                 #selection=selection.strip()
                 if selection.isdigit():
                     selection = int(selection)
@@ -422,21 +416,23 @@ def main():
     # Server credentials (used for authentication and API calls)
     #server = st.chat_input("Enter the server address (e.g., 10.85.116.58): ")
     #server=server.strip()
-    server="172.28.50.113"
+    server="172.28.50.29"
     authenticated = False
     while not authenticated:
         # username = st.chat_input("Enter your username: ")
         # #username=username.strip()
         # password = st.chat_input("Enter your password: ")
-        username="admin"
-        password="maglev1@3"
+        username="newadmin"
+        password="Maglev123"
         try:
             # Initialize RestClientManager
             rest_client = RestClientManager(server, username, password)
             authenticated = True  # Set flag to True if authentication succeeds
+            st.chat_input("Connected to DNAC ",key="input")
+
         except requests.exceptions.HTTPError as err:
             st.chat_message(f"Authentication failed: {err}")
-            retry = st.chat_input("Would you like to try again? (yes/no): ")
+            retry = st.chat_input("Would you like to try again? (yes/no): ",key="input")
             #retry=retry.strip().lower()
             if retry != 'yes':
                 st.chat_message("Exiting...")
@@ -498,7 +494,7 @@ def main():
     # Continuous query loop
     st.chat_message("\nWelcome to the Cisco DNAC API Chatbot! Type 'exit' to quit.\n")
     while True:
-        if user_query := st.chat_input("Enter your question about Cisco DNAC APIs (or type 'list ids' to view stored IDs): "):
+        if user_query := st.chat_input("Enter your question about Cisco DNAC APIs (or type 'list ids' to view stored IDs): ",key="input"):
 
         # Check if the user wants to exit or list IDs
         # if user_query.lower() in ['exit', 'quit']:
@@ -526,9 +522,9 @@ USER_AVATAR = "👤"
 BOT_AVATAR = "🤖"
 #client = main()
 
-# Ensure openai_model is initialized in session state
-if "openai_model" not in st.session_state:
-    st.session_state["openai_model"] = "gpt-3.5-turbo"
+# Ensure chat_model is initialized in session state
+if "chat_model" not in st.session_state:
+    st.session_state["chat_model"] = "gpt-3.5-turbo"
 
 
 # Load chat history from shelve file
@@ -560,7 +556,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Main chat interface
-if prompt := st.chat_input("How can I help?"):
+if prompt := st.chat_input("Do want to connect to dnac ?",key="input"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
@@ -569,7 +565,7 @@ if prompt := st.chat_input("How can I help?"):
         message_placeholder = st.empty()
         full_response = ""
         for response in main()(
-            model=st.session_state["openai_model"],
+            model=st.session_state["chat_model"],
             messages=st.session_state["messages"],
             stream=True,
         ):

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import base64
 import openai
 import streamlit as st
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 # Suppress InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -379,4 +380,8 @@ def main():
 
 if __name__ == "__main__":
     st.title("Cisco DNAC API Agent")
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            SystemMessage(content="You are a helpful assistant. Answer all questions to the best of your ability."),
+        ]
     main()
