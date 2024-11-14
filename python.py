@@ -125,7 +125,7 @@ class RestClientManager:
         headers = {"Content-Type": "application/json", **self.common_headers}
         request_url = self.base_url + resource_path
 
-        log.info(f"\nGet API, Request URL: {request_url}")
+        # log.info(f"\nGet API, Request URL: {request_url}")
 
         response = requests.get(request_url, headers=headers, verify=False)
         response.raise_for_status()  # Raise an error for bad status codes
@@ -139,10 +139,10 @@ class RestClientManager:
         headers = {"Content-Type": "application/json", **self.common_headers}
         request_url = self.base_url + resource_path
 
-        log.info(f"\nPost API, Request URL: {request_url}")
-        log.info(f"\nPost API, Payload: {payload}")
+        # log.info(f"\nPost API, Request URL: {request_url}")
+        # log.info(f"\nPost API, Payload: {payload}")
 
-        print("\nPayload Information: ", payload)
+        # print("\nPayload Information: ", payload)
 
         response = requests.post(request_url, json=payload, headers=headers, verify=False)
         response.raise_for_status()  # Raise an error for bad status codes
@@ -181,7 +181,7 @@ class RestClientManager:
         if not self.__connected:
             resource_path = "/api/system/" + self.version + "/auth/token"
             url = self.base_url + resource_path
-            print("\nURL: {}\n".format(url))
+            # print("\nURL: {}\n".format(url))
 
             response = requests.post(url,
                                      auth=HTTPBasicAuth(self.username, self.password),
@@ -190,8 +190,8 @@ class RestClientManager:
             response.raise_for_status()
             response = response.json()
 
-            print("RestClientManager:\n Token Request Initiated At Time: '{}'".format(int(time.time())))
-            print("Response: ", response)
+            # print("RestClientManager:\n Token Request Initiated At Time: '{}'".format(int(time.time())))
+            # print("Response: ", response)
 
             if 'Token' in response:
                 self._time_now = int(time.time())
@@ -211,22 +211,22 @@ class RestClientManager:
         """ Handles the token refresh """
 
         current_time = int(time.time())
-        print("RestClientManager:\n Current time: '{}'\n Token refresh time: '{}'\n Token expiry "
-              "time:  '{}' \n".format(current_time, self.token_refresh_time, self.token_expiry_time))
+        # log.info("RestClientManager:\n Current time: '{}'\n Token refresh time: '{}'\n Token expiry "
+        #       "time:  '{}' \n".format(current_time, self.token_refresh_time, self.token_expiry_time))
 
         if current_time >= self.token_refresh_time:
-            if current_time >= self.token_expiry_time:
-                print("Token Expired At Time: '{}'".format(self.token_expiry_time))
-                print("Token Refresh is being initiated after token expiry time\n")
-            else:
-                print("Token Expires At Time: '{}'".format(self.token_expiry_time))
-                print("Token refresh is being initiated 15 minutes or less prior to the token expiry time\n")
+            # if current_time >= self.token_expiry_time:
+            #     log.info("Token Expired At Time: '{}'".format(self.token_expiry_time))
+            #     log.info("Token Refresh is being initiated after token expiry time\n")
+            # else:
+            #     log.info("Token Expires At Time: '{}'".format(self.token_expiry_time))
+            #     log.info("Token refresh is being initiated 15 minutes or less prior to the token expiry time\n")
             self.__connected = False
             self.__authentication()
-        else:
-            print("Token is still valid, token will be refreshed after: '{}' "
-                  "seconds.".format(self.token_refresh_time - current_time))
-            print("\nHeaders Information: {}".format(self.common_headers))
+        # else:
+            # log.info("Token is still valid, token will be refreshed after: '{}' "
+            #       "seconds.".format(self.token_refresh_time - current_time))
+            # log.info("\nHeaders Information: {}".format(self.common_headers))
 
 # Load the Swagger JSON file from a local file
 def load_swagger_json(filepath):
@@ -278,14 +278,14 @@ def display_stored_ids():
     print()
     if stored_data['device_ids'] or stored_data['site_ids']:
         if stored_data['device_ids']:
-            print("Stored Device IDs:")
+            # print("Stored Device IDs:")
             for idx, dev_id in enumerate(stored_data['device_ids'], start=1):
                 print(f"{idx}. {dev_id}")
         else:
             print("No stored Device IDs.")
 
         if stored_data['site_ids']:
-            print("Stored Site IDs:")
+            # print("Stored Site IDs:")
             for idx, site_id in enumerate(stored_data['site_ids'], start=1):
                 print(f"{idx}. {site_id}")
         else:
@@ -384,12 +384,12 @@ def store_ids_from_item(item):
     device_id = item.get('id')
     if device_id and device_id not in stored_data['device_ids']:
         stored_data['device_ids'].append(device_id)
-        print(f"Stored device ID: {device_id}")
+        #print(f"Stored device ID: {device_id}")
     # Extract site ID
     site_id = item.get('siteId')
     if site_id and site_id not in stored_data['site_ids']:
         stored_data['site_ids'].append(site_id)
-        print(f"Stored site ID: {site_id}")
+        #print(f"Stored site ID: {site_id}")
 
 # Summarize the API response using Azure OpenAI
 def summarize_response(response):
@@ -460,7 +460,7 @@ def summarize_response(response):
                 {"role": "system", "content": "You are a helpful assistant. Well versed in DNAC Cisco APIs."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            max_tokens=2000,
             temperature=0.5,
             user=user_header_json
         )
@@ -531,9 +531,9 @@ def provision_device_workflow(rest_client):
 
     # Step 1: Configure CLI Credentials
     print("\nStep 1: Configure CLI Credentials")
-    username = input("Enter CLI username: ").strip()
-    password = getpass.getpass("Enter CLI password: ").strip()
-    enable_password = getpass.getpass("Enter enable password: ").strip()
+    username = 'campus'
+    password = 'Maglev123'
+    enable_password = 'Maglev123'
 
     payload = [{
         "username": username,
@@ -549,6 +549,7 @@ def provision_device_workflow(rest_client):
 
         # Check task status and get credential ID
         credential_id, status = check_task_and_get_credential_id(rest_client, task_id)
+        print(status)
         if status == 'SUCCESS' and credential_id:
             stored_data['cli_id'] = credential_id
             print(f"CLI Credential configured. ID: {credential_id}")
@@ -570,10 +571,10 @@ def provision_device_workflow(rest_client):
 
     # Step 2: Configure SNMP Read Community
     print("\nStep 2: Configure SNMP Read Community")
-    read_community = input("Enter SNMP read community string: ").strip()
+    read_community = 'campus'
 
     payload = [{
-        "description": read_community,  # Use read community string as description
+        "description": read_community,
         "readCommunity": read_community
     }]
 
@@ -606,10 +607,10 @@ def provision_device_workflow(rest_client):
 
     # Step 3: Configure SNMP Write Community
     print("\nStep 3: Configure SNMP Write Community")
-    write_community = input("Enter SNMP write community string: ").strip()
+    write_community = 'campus'
 
     payload = [{
-        "description": write_community,  # Use write community string as description
+        "description": write_community,
         "writeCommunity": write_community
     }]
 
@@ -686,6 +687,7 @@ def provision_device_workflow(rest_client):
                     return
 
                 data_str = task_response.get('data', '')
+
                 if data_str:
                     # Check if data_str is a JSON string
                     try:
@@ -701,6 +703,7 @@ def provision_device_workflow(rest_client):
                         print(f"Retrieved Discovery ID: {discovery_id}")
                         break
                     else:
+                        print(task_response)
                         print("Discovery ID not available yet. Waiting...")
                         time.sleep(5)
                 else:
@@ -722,11 +725,14 @@ def provision_device_workflow(rest_client):
         try:
             response = rest_client.get_api(discovery_url)
             discovery_response = response.get('response', {})
-            if isinstance(discovery_response, list) and len(discovery_response) > 0:
-                discovery_info = discovery_response[0]
-                status = discovery_info.get('discoveryStatus', '')
-                if status.lower() == 'Inactive':
+            if isinstance(discovery_response, dict) and len(discovery_response) > 0:
+
+                status = discovery_response.get('discoveryStatus', '')
+                if status.lower() == 'inactive':
                     print("Discovery completed successfully.")
+                    print("Sleeping to allow for device inventory...")
+                    time.sleep(60)
+
                     break
                 elif status.lower() == 'error':
                     print("Discovery failed.")
@@ -742,9 +748,6 @@ def provision_device_workflow(rest_client):
         except Exception as e:
             print(f"Error polling discovery status: {e}")
             return
-
-
-
 
     # Step 6: Get Discovered Switches
     print("\nStep 6: Retrieving Discovered Switches")
@@ -826,21 +829,41 @@ def provision_device_workflow(rest_client):
     while True:
         try:
             response = rest_client.get_api(url)
-            progress = response['response'].get('progress', '')
-            if "Provisioned successfully" in progress or "successfully" in progress.lower():
-                print("Provisioning completed successfully.")
-                break
-            elif "Failure" in progress or "error" in progress.lower():
-                print(f"Provisioning failed: {progress}")
-                return
-            else:
-                print("Provisioning in progress...")
+            progress = response['response'].get('data', '')
+            if not progress:
+                print("No progress data available yet. Provisioning in progress...")
                 time.sleep(5)
+                continue
+            try:
+                # Parsing the 'progress' data string
+                data_pairs = progress.split(';')
+                data_dict = {}
+                for pair in data_pairs:
+                    if '=' in pair:
+                        key, value = pair.split('=', 1)
+                        data_dict[key.strip()] = value.strip()
+
+                processcfs_complete = data_dict.get('processcfs_complete', '').lower()
+                failure_task = data_dict.get('failure_task', 'NA').lower()
+
+                if processcfs_complete == 'true':
+                    print("Provisioning completed successfully.")
+                    break
+                elif failure_task != 'na':
+                    print(f"Provisioning failed: {failure_task}")
+                    return
+                else:
+                    print("Provisioning in progress...")
+                    time.sleep(5)
+            except Exception as e:
+                print(f"Error parsing provisioning status: {e}")
+                return
         except Exception as e:
             print(f"Error checking provisioning status: {e}")
             return
 
     print("Device provisioning workflow completed successfully.")
+
 
 # Hybrid matching function to check expected questions first, then fallback to full search
 def hybrid_search(
@@ -971,7 +994,7 @@ def main():
             "description": "API to get devices that are assigned to a site.",
             "tags": ["Sites"]
         },
-        "what are devices": {
+        "what are the devices I have": {
             "path": "/dna/intent/api/v1/sda/provisionDevices",
             "method": "get",
             "operation_id": "getProvisionedDevices",
