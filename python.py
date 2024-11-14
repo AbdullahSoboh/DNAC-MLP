@@ -1,5 +1,6 @@
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import sys
 import json
 import torch
 from sentence_transformers import SentenceTransformer, util
@@ -11,6 +12,8 @@ import re
 from dotenv import load_dotenv
 import base64
 import openai
+import time
+from requests.auth import HTTPBasicAuth
 
 # Suppress InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -53,40 +56,177 @@ if missing_env_vars:
     # Optionally, you can exit the script if critical variables are missing
     # exit(1)
 
-# Global storage for IDs
+# Global storage for IDs and other data
 stored_data = {
     'device_ids': [],
     'site_ids': [],
+    'cli_id': None,
+    'snmp_read_id': None,
+    'snmp_write_id': None,
 }
 
-# RestClientManager class for handling authentication and API requests
+# RestClientManager class
 class RestClientManager:
-    def __init__(self, server, username, password):
-        self.base_url = f"https://{server}"
-        self.session = requests.Session()
-        self.session.verify = False  # Disable SSL verification if necessary
-        self.token = self.get_token(username, password)
-        self.session.headers.update({'X-Auth-Token': self.token})
+    """ Client manager to interact with Rest API Client. """
 
-    def get_token(self, username, password):
-        url = f"{self.base_url}/dna/system/api/v1/auth/token"
-        response = self.session.post(url, auth=(username, password))
-        response.raise_for_status()
-        token = response.json()['Token']
-        log.info("Authentication successful. Token obtained.")
-        return token
+    # Increasing timeout to 60 sec as we are seeing read timeouts
+    TIMEOUT = 60  # As requested by Maglev team via Olaf
 
-    def get_api(self, endpoint, params=None):
-        url = f"{self.base_url}{endpoint}"
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
+    def __init__(self,
+                 server,
+                 username,
+                 password,
+                 version="v1",
+                 connect=True,
+                 force=False,
+                 port=None
+                 ):
+        """ Initializer for Rest
+        Args:
+            server (str)   : cluster server name (routable DNS address or IP)
+            username (str) : user name to authenticate with
+            password (str) : password to authenticate with
+            port (str)     : port number
+            connect (bool) : Connects if True
+            force (bool)   : Connects forcefully if it is set to True
+        """
 
-    def post_api(self, endpoint, payload):
-        url = f"{self.base_url}{endpoint}"
-        response = self.session.post(url, json=payload)
-        response.raise_for_status()
-        return response.json()
+        base_url = ""
+        protocol = "https"
+        self.version = version
+        self.server = server
+        self.username = username
+        self.password = password
+        self.port = str(port) if port else ""
+
+        if port:
+            self.server = self.server + ":" + self.port
+
+        if protocol not in ["http", "https"]:
+            log.error("Not supported protocol {}.".format(protocol))
+            raise Exception("Not supported protocol {}.".format(protocol))
+
+        self.base_url = "{}://{}{}".format(protocol, self.server, base_url)
+        self.endpoint_base_url = base_url
+
+        self._default_headers = {}
+        self._common_headers = {}
+        self.compact_response = {}
+
+        self.__connected = False
+        if connect:
+            self.connect(force=force)
+
+    def get_api(self, resource_path, payload=None, timeout=TIMEOUT, port=None, protocol=None, **kwargs):
+        if self.__connected:
+            print("\nChecking the Token Validity\n")
+            self.__check_for_token_refresh()
+
+        headers = {"Content-Type": "application/json", **self.common_headers}
+        request_url = self.base_url + resource_path
+
+        log.info(f"\nGet API, Request URL: {request_url}")
+
+        response = requests.get(request_url, headers=headers, verify=False)
+        response.raise_for_status()  # Raise an error for bad status codes
+        return response.json()  # Return the JSON-decoded response
+
+    def post_api(self, resource_path, payload=None, timeout=TIMEOUT, port=None, protocol=None, **kwargs):
+        if self.__connected:
+            print("\nChecking the Token Validity\n")
+            self.__check_for_token_refresh()
+
+        headers = {"Content-Type": "application/json", **self.common_headers}
+        request_url = self.base_url + resource_path
+
+        log.info(f"\nPost API, Request URL: {request_url}")
+        log.info(f"\nPost API, Payload: {payload}")
+
+        print("\nPayload Information: ", payload)
+
+        response = requests.post(request_url, json=payload, headers=headers, verify=False)
+        response.raise_for_status()  # Raise an error for bad status codes
+        return response.json()  # Return the JSON-decoded response
+
+    def connect(self, force=False):
+        """ Generates a new ticket and establishes a fresh Rest client.
+        Args:
+            force (bool): If true, forces a new connection, else authenticates the existing one
+        """
+
+        if force:
+            self.__connected = False
+
+        self.__authentication()
+
+    def disconnect(self):
+        """ Disconnect from API client """
+
+        print("Disconnecting the Rest client.")
+        try:
+            resource_path = "/api/system/" + self.version + "/identitymgmt/logoff"
+            url = self.base_url + resource_path
+            print("\nURL: {}\n".format(url))
+
+            resource = requests.get(url, headers=self.common_headers, verify=False)
+            log.info(f"Disconnect API Response: {resource.text}")
+        except KeyError:
+            print("Already disconnected Rest client.")
+
+        self.__connected = False
+
+    def __authentication(self):
+        """ Generates a new authentication token for both oprim and converged. """
+
+        if not self.__connected:
+            resource_path = "/api/system/" + self.version + "/auth/token"
+            url = self.base_url + resource_path
+            print("\nURL: {}\n".format(url))
+
+            response = requests.post(url,
+                                     auth=HTTPBasicAuth(self.username, self.password),
+                                     verify=False
+                                     )
+            response.raise_for_status()
+            response = response.json()
+
+            print("RestClientManager:\n Token Request Initiated At Time: '{}'".format(int(time.time())))
+            print("Response: ", response)
+
+            if 'Token' in response:
+                self._time_now = int(time.time())
+                self.token_expiry_time = int(time.time()) + 3600
+                self.token_refresh_time = self.token_expiry_time - 900
+                headers = {"X-Auth-Token": response["Token"], "X-CSRF-Token": "soon-enabled"}
+                self.common_headers = headers
+            else:
+                raise Exception("Cannot create REST client for an unauthorized user {}"
+                                .format(self.username))
+
+            self.__connected = True
+        else:
+            log.info("Already connected to Northbound API client.")
+
+    def __check_for_token_refresh(self):
+        """ Handles the token refresh """
+
+        current_time = int(time.time())
+        print("RestClientManager:\n Current time: '{}'\n Token refresh time: '{}'\n Token expiry "
+              "time:  '{}' \n".format(current_time, self.token_refresh_time, self.token_expiry_time))
+
+        if current_time >= self.token_refresh_time:
+            if current_time >= self.token_expiry_time:
+                print("Token Expired At Time: '{}'".format(self.token_expiry_time))
+                print("Token Refresh is being initiated after token expiry time\n")
+            else:
+                print("Token Expires At Time: '{}'".format(self.token_expiry_time))
+                print("Token refresh is being initiated 15 minutes or less prior to the token expiry time\n")
+            self.__connected = False
+            self.__authentication()
+        else:
+            print("Token is still valid, token will be refreshed after: '{}' "
+                  "seconds.".format(self.token_refresh_time - current_time))
+            print("\nHeaders Information: {}".format(self.common_headers))
 
 # Load the Swagger JSON file from a local file
 def load_swagger_json(filepath):
@@ -135,12 +275,23 @@ def display_matched_apis(matched_apis):
         print("---")
 
 def display_stored_ids():
-    print("\nStored Device IDs:")
-    for idx, dev_id in enumerate(stored_data['device_ids'], start=1):
-        print(f"{idx}. {dev_id}")
-    print("Stored Site IDs:")
-    for idx, site_id in enumerate(stored_data['site_ids'], start=1):
-        print(f"{idx}. {site_id}")
+    print()
+    if stored_data['device_ids'] or stored_data['site_ids']:
+        if stored_data['device_ids']:
+            print("Stored Device IDs:")
+            for idx, dev_id in enumerate(stored_data['device_ids'], start=1):
+                print(f"{idx}. {dev_id}")
+        else:
+            print("No stored Device IDs.")
+
+        if stored_data['site_ids']:
+            print("Stored Site IDs:")
+            for idx, site_id in enumerate(stored_data['site_ids'], start=1):
+                print(f"{idx}. {site_id}")
+        else:
+            print("No stored Site IDs.")
+    else:
+        print("No stored IDs available.")
     print()
 
 def get_value_from_selection(selection, stored_list, placeholder):
@@ -319,6 +470,378 @@ def summarize_response(response):
         log.error(f"An error occurred while summarizing: {e}")
         return "No summary available."
 
+# Helper functions for task management and credential retrieval
+
+def check_task_and_get_credential_id(rest_client, task_id):
+    """Checks task status and retrieves the credential ID."""
+    url = f"/dna/intent/api/v1/task/{task_id}"
+    while True:
+        try:
+            response = rest_client.get_api(url)
+            task_response = response['response']
+            if task_response.get('isError'):
+                failure_reason = task_response.get('failureReason', '')
+                print(f"Task failed: {failure_reason}")
+                if 'already exists' in failure_reason.lower():
+                    # Credential already exists
+                    return None, 'ALREADY_EXISTS'
+                else:
+                    # Other error
+                    return None, 'ERROR'
+            else:
+                progress = task_response.get('progress')
+                if progress and 'credentialId' in progress:
+                    # The progress field might contain JSON data as a string
+                    progress_data = json.loads(progress.replace("'", "\""))
+                    credential_id = progress_data.get('credentialId')
+                    return credential_id, 'SUCCESS'
+                elif 'endTime' in task_response:
+                    # Task completed but no credentialId in progress
+                    return None, 'COMPLETED_NO_CREDENTIAL_ID'
+                else:
+                    print("Task in progress...")
+                    time.sleep(2)
+        except Exception as e:
+            print(f"Error checking task status: {e}")
+            return None, 'ERROR'
+
+def get_existing_credential_id(rest_client, credential_type, identifier):
+    """Retrieves the existing credential ID based on type and identifier."""
+    url = f"/dna/intent/api/v1/global-credential?credentialSubType={credential_type}"
+    try:
+        response = rest_client.get_api(url)
+        for credential in response.get('response', []):
+            if credential_type == 'CLI':
+                # Match based on username
+                if credential.get('username') == identifier:
+                    return credential.get('id')
+            elif credential_type in ['SNMPV2_READ_COMMUNITY', 'SNMPV2_WRITE_COMMUNITY']:
+                # Match based on description
+                if credential.get('description') == identifier:
+                    return credential.get('id')
+        return None
+    except Exception as e:
+        print(f"Error retrieving existing credential ID: {e}")
+        return None
+
+# Provisioning Workflow Functions
+
+def provision_device_workflow(rest_client):
+    print("Starting device provisioning workflow...")
+
+    # Step 1: Configure CLI Credentials
+    print("\nStep 1: Configure CLI Credentials")
+    username = input("Enter CLI username: ").strip()
+    password = getpass.getpass("Enter CLI password: ").strip()
+    enable_password = getpass.getpass("Enter enable password: ").strip()
+
+    payload = [{
+        "username": username,
+        "password": password,
+        "enablePassword": enable_password
+    }]
+
+    url = "/dna/intent/api/v1/global-credential/cli"
+    try:
+        response = rest_client.post_api(url, payload)
+        task_id = response['response']['taskId']
+        print(f"Credential creation initiated. Task ID: {task_id}")
+
+        # Check task status and get credential ID
+        credential_id, status = check_task_and_get_credential_id(rest_client, task_id)
+        if status == 'SUCCESS' and credential_id:
+            stored_data['cli_id'] = credential_id
+            print(f"CLI Credential configured. ID: {credential_id}")
+        elif status == 'ALREADY_EXISTS':
+            print("CLI credential already exists. Retrieving existing credentials.")
+            credential_id = get_existing_credential_id(rest_client, 'CLI', username)
+            if credential_id:
+                stored_data['cli_id'] = credential_id
+                print(f"Using existing CLI Credential ID: {credential_id}")
+            else:
+                print("Failed to obtain existing CLI Credential ID.")
+                return
+        else:
+            print("Failed to configure CLI Credential.")
+            return
+    except Exception as e:
+        print(f"Error configuring CLI credentials: {e}")
+        return
+
+    # Step 2: Configure SNMP Read Community
+    print("\nStep 2: Configure SNMP Read Community")
+    read_community = input("Enter SNMP read community string: ").strip()
+
+    payload = [{
+        "description": read_community,  # Use read community string as description
+        "readCommunity": read_community
+    }]
+
+    url = "/dna/intent/api/v1/global-credential/snmpv2-read-community"
+    try:
+        response = rest_client.post_api(url, payload)
+        task_id = response['response']['taskId']
+        print(f"SNMP Read Community creation initiated. Task ID: {task_id}")
+
+        # Check task status and get credential ID
+        credential_id, status = check_task_and_get_credential_id(rest_client, task_id)
+        if status == 'SUCCESS' and credential_id:
+            stored_data['snmp_read_id'] = credential_id
+            print(f"SNMP Read Community configured. ID: {credential_id}")
+        elif status == 'ALREADY_EXISTS':
+            print("SNMP Read Community credential already exists. Retrieving existing credentials.")
+            credential_id = get_existing_credential_id(rest_client, 'SNMPV2_READ_COMMUNITY', read_community)
+            if credential_id:
+                stored_data['snmp_read_id'] = credential_id
+                print(f"Using existing SNMP Read Credential ID: {credential_id}")
+            else:
+                print("Failed to obtain existing SNMP Read Credential ID.")
+                return
+        else:
+            print("Failed to configure SNMP Read Credential.")
+            return
+    except Exception as e:
+        print(f"Error configuring SNMP read community: {e}")
+        return
+
+    # Step 3: Configure SNMP Write Community
+    print("\nStep 3: Configure SNMP Write Community")
+    write_community = input("Enter SNMP write community string: ").strip()
+
+    payload = [{
+        "description": write_community,  # Use write community string as description
+        "writeCommunity": write_community
+    }]
+
+    url = "/dna/intent/api/v1/global-credential/snmpv2-write-community"
+    try:
+        response = rest_client.post_api(url, payload)
+        task_id = response['response']['taskId']
+        print(f"SNMP Write Community creation initiated. Task ID: {task_id}")
+
+        # Check task status and get credential ID
+        credential_id, status = check_task_and_get_credential_id(rest_client, task_id)
+        if status == 'SUCCESS' and credential_id:
+            stored_data['snmp_write_id'] = credential_id
+            print(f"SNMP Write Community configured. ID: {credential_id}")
+        elif status == 'ALREADY_EXISTS':
+            print("SNMP Write Community credential already exists. Retrieving existing credentials.")
+            credential_id = get_existing_credential_id(rest_client, 'SNMPV2_WRITE_COMMUNITY', write_community)
+            if credential_id:
+                stored_data['snmp_write_id'] = credential_id
+                print(f"Using existing SNMP Write Credential ID: {credential_id}")
+            else:
+                print("Failed to obtain existing SNMP Write Credential ID.")
+                return
+        else:
+            print("Failed to configure SNMP Write Credential.")
+            return
+    except Exception as e:
+        print(f"Error configuring SNMP write community: {e}")
+        return
+
+    # Proceed with the rest of the provisioning workflow...
+
+    # Step 4: Discover Switches
+    print("\nStep 4: Discover Switches")
+    discovery_name = input("Enter discovery name: ").strip()
+    switch_list = input("Enter switch IP addresses (comma-separated): ").strip()
+
+    payload = {
+        "name": discovery_name,
+        "discoveryType": "Multi range",
+        "ipAddressList": switch_list,
+        "globalCredentialIdList": [stored_data['cli_id'], stored_data['snmp_read_id'], stored_data['snmp_write_id']],
+        "protocolOrder": "ssh,telnet",
+        "snmpVersion": "v2",
+        "timeout": "5",
+        "retry": "3"
+    }
+
+    url = "/dna/intent/api/v1/discovery"
+    try:
+        response = rest_client.post_api(url, payload)
+        task_id = response['response']['taskId']
+        print(f"Discovery started. Task ID: {task_id}")
+    except Exception as e:
+        print(f"Error starting discovery: {e}")
+        return
+
+    # Step 5: Check Discovery Status
+    print("\nStep 5: Checking Discovery Status")
+    task_url = f"/dna/intent/api/v1/task/{task_id}"
+    discovery_id = None
+
+    # First, get the discovery ID from the task
+    while True:
+        try:
+            response = rest_client.get_api(task_url)
+            task_response = response.get('response', {})
+            if isinstance(task_response, dict):
+                is_error = task_response.get('isError', False)
+
+                if is_error:
+                    failure_reason = task_response.get('failureReason', 'Unknown error')
+                    print(f"Discovery task failed: {failure_reason}")
+                    return
+
+                data_str = task_response.get('data', '')
+                if data_str:
+                    # Check if data_str is a JSON string
+                    try:
+                        data_json = json.loads(data_str)
+                        # If data_json is a dict, extract discoveryId
+                        if isinstance(data_json, dict):
+                            discovery_id = data_json.get('discoveryId', '')
+                    except json.JSONDecodeError:
+                        # If data_str is not JSON, assume it's the discovery ID
+                        discovery_id = data_str.strip('"')  # Remove any surrounding quotes
+
+                    if discovery_id:
+                        print(f"Retrieved Discovery ID: {discovery_id}")
+                        break
+                    else:
+                        print("Discovery ID not available yet. Waiting...")
+                        time.sleep(5)
+                else:
+                    print("No 'data' field in task response. Waiting...")
+                    time.sleep(5)
+            else:
+                print(f"Task response is not ready yet: {task_response}")
+                print("Waiting...")
+                time.sleep(5)
+        except Exception as e:
+            print(f"Error retrieving discovery ID: {e}")
+            return
+
+    # Now poll the discovery status using the discovery ID
+    print("\nPolling Discovery Status")
+    discovery_url = f"/dna/intent/api/v1/discovery/{discovery_id}"
+
+    while True:
+        try:
+            response = rest_client.get_api(discovery_url)
+            discovery_response = response.get('response', {})
+            if isinstance(discovery_response, list) and len(discovery_response) > 0:
+                discovery_info = discovery_response[0]
+                status = discovery_info.get('discoveryStatus', '')
+                if status.lower() == 'Inactive':
+                    print("Discovery completed successfully.")
+                    break
+                elif status.lower() == 'error':
+                    print("Discovery failed.")
+                    return
+                else:
+                    print(f"Discovery status: {status}")
+                    print("Discovery in progress...")
+                    time.sleep(5)
+            else:
+                print(discovery_response)
+                print("Discovery information not available yet. Waiting...")
+                time.sleep(5)
+        except Exception as e:
+            print(f"Error polling discovery status: {e}")
+            return
+
+
+
+
+    # Step 6: Get Discovered Switches
+    print("\nStep 6: Retrieving Discovered Switches")
+    url = "/dna/intent/api/v1/network-device/"
+    try:
+        response = rest_client.get_api(url)
+        switch_dict = {}
+        for switch in response.get("response", []):
+            hostname = switch.get('hostname')
+            device_id = switch.get('id')
+            if hostname and device_id:
+                switch_dict[hostname] = device_id
+        if not switch_dict:
+            print("No switches discovered.")
+            return
+        print("Discovered Switches:")
+        for idx, (hostname, device_id) in enumerate(switch_dict.items(), start=1):
+            print(f"{idx}. Hostname: {hostname}, Device ID: {device_id}")
+    except Exception as e:
+        print(f"Error retrieving discovered switches: {e}")
+        return
+
+    # Step 7: Get Sites
+    print("\nStep 7: Retrieving Sites")
+    url = "/dna/intent/api/v1/site"
+    try:
+        response = rest_client.get_api(url)
+        site_dict = {}
+        for site in response.get("response", []):
+            site_name = site.get('siteNameHierarchy')
+            site_id = site.get('id')
+            if site_name and site_id:
+                site_dict[site_name] = site_id
+        if not site_dict:
+            print("No sites available.")
+            return
+        print("Available Sites:")
+        for idx, (site_name, site_id) in enumerate(site_dict.items(), start=1):
+            print(f"{idx}. Site: {site_name}, Site ID: {site_id}")
+    except Exception as e:
+        print(f"Error retrieving sites: {e}")
+        return
+
+    # Step 8: Provision Site
+    print("\nStep 8: Provisioning Site")
+    # Select a site
+    site_selection = input("Enter the site name you want to provision to: ").strip()
+    site_id = site_dict.get(site_selection)
+    if not site_id:
+        print("Invalid site selection.")
+        return
+
+    # Select a switch
+    switch_selection = input("Enter the hostname of the switch to provision: ").strip()
+    device_id = switch_dict.get(switch_selection)
+    if not device_id:
+        print("Invalid switch selection.")
+        return
+
+    payload = [
+        {
+            "siteId": site_id,
+            "networkDeviceId": device_id
+        }
+    ]
+
+    url = "/dna/intent/api/v1/sda/provisionDevices"
+    try:
+        response = rest_client.post_api(url, payload)
+        task_id = response['response']['taskId']
+        print(f"Provisioning started. Task ID: {task_id}")
+    except Exception as e:
+        print(f"Error starting provisioning: {e}")
+        return
+
+    # Step 9: Check Provisioning Status
+    print("\nStep 9: Checking Provisioning Status")
+    url = f"/dna/intent/api/v1/task/{task_id}"
+    while True:
+        try:
+            response = rest_client.get_api(url)
+            progress = response['response'].get('progress', '')
+            if "Provisioned successfully" in progress or "successfully" in progress.lower():
+                print("Provisioning completed successfully.")
+                break
+            elif "Failure" in progress or "error" in progress.lower():
+                print(f"Provisioning failed: {progress}")
+                return
+            else:
+                print("Provisioning in progress...")
+                time.sleep(5)
+        except Exception as e:
+            print(f"Error checking provisioning status: {e}")
+            return
+
+    print("Device provisioning workflow completed successfully.")
+
 # Hybrid matching function to check expected questions first, then fallback to full search
 def hybrid_search(
     query, expected_questions, question_embeddings,
@@ -340,45 +863,49 @@ def hybrid_search(
     # Check if similarity is above the threshold
     if best_score > similarity_threshold:
         best_question = list(expected_questions.keys())[best_match_idx]
-        matched_api = expected_questions[best_question]
-        print(f"\nMatched API directly from expected question: '{best_question}'")
-        print(f"Path: {matched_api['path']}")
-        print(f"Method: {matched_api['method']}")
-        print(f"Operation ID: {matched_api['operation_id']}")
-        print(f"Summary: {matched_api['summary']}")
-        print(f"Description: {matched_api['description']}")
-        print(f"Tags: {', '.join(matched_api['tags'])}\n")
-        print("---")
-        # Ask the user if they want to execute the matched API
-        execute_decision = input("Would you like to execute this API? (yes/no): ").strip().lower()
-        if execute_decision == 'yes':
-            execute_api(matched_api, rest_client)
+        # Check if the matched question is for provisioning
+        if best_question == "provision a device":
+            provision_device_workflow(rest_client)
         else:
-            # Ask if the user wants to perform a wider search
-            search_decision = input("Would you like to perform a wider search across all APIs? (yes/no): ").strip().lower()
-            if search_decision == 'yes':
-                # Perform a full API search
-                matched_apis = find_relevant_api(query, api_endpoints, api_embeddings, model, top_k=top_k)
-                display_matched_apis(matched_apis)
-                # Prompt the user to select an API to execute
-                if matched_apis:
-                    print(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
-                    while True:
-                        selection = input("Your choice: ").strip()
-                        if selection.isdigit():
-                            selection = int(selection)
-                            if 0 <= selection <= len(matched_apis):
-                                break
-                        print(f"Please enter a number between 0 and {len(matched_apis)}.")
-                    if selection == 0:
-                        print("Skipping API execution.")
-                    else:
-                        selected_api = matched_apis[selection - 1]
-                        execute_api(selected_api, rest_client)
-                else:
-                    print("No APIs found to execute.")
+            matched_api = expected_questions[best_question]
+            print(f"\nMatched API directly from expected question: '{best_question}'")
+            print(f"Path: {matched_api['path']}")
+            print(f"Method: {matched_api['method']}")
+            print(f"Operation ID: {matched_api['operation_id']}")
+            print(f"Summary: {matched_api['summary']}")
+            print(f"Description: {matched_api['description']}")
+            print(f"Tags: {', '.join(matched_api['tags'])}\n")
+            print("---")
+            # Ask the user if they want to execute the matched API
+            execute_decision = input("Would you like to execute this API? (yes/no): ").strip().lower()
+            if execute_decision == 'yes':
+                execute_api(matched_api, rest_client)
             else:
-                print("Okay, no action will be taken.")
+                # Ask if the user wants to perform a wider search
+                search_decision = input("Would you like to perform a wider search across all APIs? (yes/no): ").strip().lower()
+                if search_decision == 'yes':
+                    # Perform a full API search
+                    matched_apis = find_relevant_api(query, api_endpoints, api_embeddings, model, top_k=top_k)
+                    display_matched_apis(matched_apis)
+                    # Prompt the user to select an API to execute
+                    if matched_apis:
+                        print(f"\nEnter the number of the API you wish to execute (1-{len(matched_apis)}), or 0 to skip:")
+                        while True:
+                            selection = input("Your choice: ").strip()
+                            if selection.isdigit():
+                                selection = int(selection)
+                                if 0 <= selection <= len(matched_apis):
+                                    break
+                            print(f"Please enter a number between 0 and {len(matched_apis)}.")
+                        if selection == 0:
+                            print("Skipping API execution.")
+                        else:
+                            selected_api = matched_apis[selection - 1]
+                            execute_api(selected_api, rest_client)
+                    else:
+                        print("No APIs found to execute.")
+                else:
+                    print("Okay, no action will be taken.")
     else:
         # If no close match, fallback to full API search
         print("\nNo close match found in expected questions. Performing full API search...")
@@ -435,14 +962,7 @@ def main():
 
     # Expected questions and their mappings to specific APIs
     expected_questions = {
-        "provision a device to a site": {
-            "path": "/dna/intent/api/v1/sda/provisionDevices",
-            "method": "post",
-            "operation_id": "provisionDevices",
-            "summary": "Provision devices",
-            "description": "Provisions network devices to respective Sites based on user input.",
-            "tags": ["SDA"]
-        },
+        "provision a device": None,  # We'll handle this in the hybrid_search function
         "get devices assigned to a site": {
             "path": "/dna/intent/api/v1/site-member/{id}/member",
             "method": "get",
